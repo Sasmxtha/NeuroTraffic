@@ -1,0 +1,30 @@
+# Raw data (37 GB)
+neurotraffic_data/
+
+# Generated outputs
+bike_stations.csv
+bike_station_zones.csv
+
+# Temp/unused scripts
+debug_311.py
+mapreduce_mapper.py
+mapreduce_reducer.py
+
+# OS/IDE
+.DS_Store
+__MACOSX/
+*.pyc
+__pycache__/
+.idea/
+.vscode/
+
+# Docker volumes
+hadoop_namenode/
+hadoop_datanode*/
+
+# Misc folders
+DON_t/
+SAS/
+
+# Claude
+.claude/
