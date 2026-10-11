@@ -1,0 +1,9 @@
+model,actual,predicted,count
+GBT,Normal,Normal,66088
+GBT,Normal,Disruption,844
+GBT,Disruption,Normal,916
+GBT,Disruption,Disruption,10653
+IsolationForest,Normal,Normal,66088
+IsolationForest,Normal,Disruption,844
+IsolationForest,Disruption,Normal,916
+IsolationForest,Disruption,Disruption,10653

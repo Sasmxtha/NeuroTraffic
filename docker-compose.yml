@@ -12,7 +12,8 @@ services:
       - ./hadoop.env
     volumes:
       - namenode_data:/hadoop/dfs/name
-      - ./neurotraffic_data:/data/local    # Mount your downloaded data
+      - ./neurotraffic_data:/data/local
+      - ./04_mapreduce:/project/04_mapreduce
     networks:
       - hadoop_net
 
@@ -20,6 +21,8 @@ services:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
     container_name: datanode1
     hostname: datanode1
+    ports:
+      - "9864:9864"
     environment:
       - SERVICE_PRECONDITION=namenode:9870
     env_file:
@@ -35,6 +38,8 @@ services:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
     container_name: datanode2
     hostname: datanode2
+    ports:
+      - "9865:9864"
     environment:
       - SERVICE_PRECONDITION=namenode:9870
     env_file:
@@ -50,6 +55,8 @@ services:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
     container_name: datanode3
     hostname: datanode3
+    ports:
+      - "9866:9864"
     environment:
       - SERVICE_PRECONDITION=namenode:9870
     env_file:
@@ -75,13 +82,14 @@ services:
       - ./hadoop.env
     volumes:
       - ./neurotraffic_data:/data/local
-      - ./clean_taxi.py:/scripts/clean_taxi.py
-      - ./clean_bike.py:/scripts/clean_bike.py
-      - ./clean_subway.py:/scripts/clean_subway.py
-      - ./clean_weather.py:/scripts/clean_weather.py
-      - ./clean_311.py:/scripts/clean_311.py
-      - ./clean_events.py:/scripts/clean_events.py
-      - ./join_all.py:/scripts/join_all.py
+      - ./01_ingestion:/project/01_ingestion
+      - ./02_cleaning:/project/02_cleaning
+      - ./03_integration:/project/03_integration
+      - ./04_mapreduce:/project/04_mapreduce
+      - ./05_graph:/project/05_graph
+      - ./06_ml:/project/06_ml
+      - ./07_streaming:/project/07_streaming
+      - ./08_dashboard:/project/08_dashboard
     networks:
       - hadoop_net
     depends_on:

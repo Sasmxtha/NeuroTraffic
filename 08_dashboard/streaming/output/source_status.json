@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-10-10T04:44:52.394169-04:00",
+  "sources": [
+    {
+      "name": "Subway Ridership",
+      "kind": "transport",
+      "provider": "MTA",
+      "observed_at": "2026-10-10T04:44:52.394169-04:00",
+      "detail": "Simulated ridership data"
+    },
+    {
+      "name": "Taxi Trips",
+      "kind": "transport",
+      "provider": "TLC",
+      "observed_at": "2026-10-10T04:44:52.394169-04:00",
+      "detail": "Simulated taxi data"
+    },
+    {
+      "name": "CitiBike",
+      "kind": "transport",
+      "provider": "Lyft",
+      "observed_at": "2026-10-10T04:44:52.394169-04:00",
+      "detail": "Simulated bike-share data"
+    },
+    {
+      "name": "Weather",
+      "kind": "weather",
+      "provider": "Open-Meteo",
+      "observed_at": "2026-10-10T04:44:52.394169-04:00",
+      "detail": "Simulated weather conditions"
+    },
+    {
+      "name": "311 Complaints",
+      "kind": "external",
+      "provider": "NYC 311",
+      "observed_at": "2026-10-10T04:44:52.394169-04:00",
+      "detail": "Simulated complaint data"
+    },
+    {
+      "name": "Events",
+      "kind": "external",
+      "provider": "NYC Open Data",
+      "observed_at": "2026-10-10T04:44:52.394169-04:00",
+      "detail": "Simulated event data"
+    }
+  ],
+  "mta_alerts": []
+}

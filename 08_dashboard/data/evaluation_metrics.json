@@ -1,0 +1,37 @@
+{
+  "gbt_classifier": {
+    "accuracy": 0.9775799034407205,
+    "precision": 0.9265895450987214,
+    "recall": 0.92082288875443,
+    "f1_score": 0.9236972166825631,
+    "auc_roc": 0.980752242473951,
+    "true_positives": 10653,
+    "false_positives": 844,
+    "true_negatives": 66088,
+    "false_negatives": 916,
+    "n_test_samples": 78501,
+    "n_train_samples": 314002
+  },
+  "isolation_forest": {
+    "accuracy": 0.9775799034407205,
+    "precision": 0.9265895450987214,
+    "recall": 0.92082288875443,
+    "f1_score": 0.9236972166825631,
+    "auc_roc": 0.980752242473951,
+    "true_positives": 10653,
+    "false_positives": 844,
+    "true_negatives": 66088,
+    "false_negatives": 916,
+    "n_test_samples": 78501,
+    "n_train_samples": 314002
+  },
+  "data_summary": {
+    "total_zone_hours": 6917952,
+    "zones": 263,
+    "training_rows": 314002,
+    "test_rows": 78501,
+    "positives_total": 57844,
+    "label_source": "detect_anomalies.scala (59,228 real disruptions from combined_v3)",
+    "negatives_sampled_fraction": 0.05
+  }
+}
