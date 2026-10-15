@@ -24,6 +24,8 @@ def inject_css():
     html, body, [data-testid="stAppViewContainer"] { background: #090e1a !important; color: #e2e8f0 !important; }
     [data-testid="stSidebar"] { background: linear-gradient(180deg, #0d1425 0%, #111827 100%) !important; border-right: 1px solid rgba(0,212,255,0.12) !important; }
     #MainMenu, footer, header { visibility: hidden; }
+[data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"], [data-testid="stSidebarCollapseButton"] { visibility: visible !important; }
+[data-testid="stIconMaterial"], .material-symbols-rounded { font-family: "Material Symbols Rounded" !important; }
     [data-testid="stDecoration"] { display: none; }
     [data-testid="metric-container"] { background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(0,212,255,0.15) !important; border-radius: 12px !important; padding: 1rem !important; }
     [data-testid="metric-container"] label { color: #94a3b8 !important; font-size: 0.75rem !important; }
@@ -46,7 +48,7 @@ st.set_page_config(
     page_title="Analytics — NeuroTraffic",
     page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 import hdfs_helper
 inject_css()

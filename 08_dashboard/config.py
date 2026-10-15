@@ -40,6 +40,7 @@ HDFS_HISTORICAL_PARQUET      = "/data/neurotraffic/dashboard/historical_predicti
 HDFS_STREAMING_INPUT_DIR     = "/data/streaming/input"
 HDFS_STREAMING_OUTPUT_DIR    = "/data/streaming/output"
 HDFS_LATEST_CSV              = "/data/streaming/output/latest.csv"
+HDFS_LIVE_HISTORY_CSV        = "/data/streaming/output/live_history.csv"
 HDFS_SOURCE_STATUS_JSON      = "/data/streaming/output/source_status.json"
 
 # ── Local Data paths ──

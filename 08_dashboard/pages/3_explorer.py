@@ -25,6 +25,8 @@ def inject_css():
     html, body, [data-testid="stAppViewContainer"] { background: #090e1a !important; color: #e2e8f0 !important; }
     [data-testid="stSidebar"] { background: linear-gradient(180deg, #0d1425 0%, #111827 100%) !important; border-right: 1px solid rgba(0,212,255,0.12) !important; }
     #MainMenu, footer, header { visibility: hidden; }
+[data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"], [data-testid="stSidebarCollapseButton"] { visibility: visible !important; }
+[data-testid="stIconMaterial"], .material-symbols-rounded { font-family: "Material Symbols Rounded" !important; }
     [data-testid="stDecoration"] { display: none; }
     [data-testid="metric-container"] { background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(0,212,255,0.15) !important; border-radius: 12px !important; padding: 1rem !important; }
     [data-testid="metric-container"] label { color: #94a3b8 !important; font-size: 0.75rem !important; }
@@ -45,7 +47,7 @@ st.set_page_config(
     page_title="Explorer — NeuroTraffic",
     page_icon="\U0001f4ca",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 import config
 import hdfs_helper
@@ -74,14 +76,12 @@ def load_nodes(use_hdfs):
     return hdfs_helper.load_dataframe(config.GRAPH_NODES_CSV, config.HDFS_GRAPH_NODES_CSV, use_hdfs=use_hdfs)
 
 @st.cache_data(ttl=60)
-def load_live_history():
+def load_live_history(use_hdfs):
     hist_path = os.path.join(config.STREAMING_DIR, "output", "live_history.csv")
-    if os.path.exists(hist_path):
-        df = pd.read_csv(hist_path)
-        if "timestamp" in df.columns:
-            df["date"] = pd.to_datetime(df["timestamp"])
-        return df
-    return None
+    df = hdfs_helper.load_dataframe(hist_path, config.HDFS_LIVE_HISTORY_CSV, use_hdfs=use_hdfs)
+    if df is not None and "timestamp" in df.columns:
+        df["date"] = pd.to_datetime(df["timestamp"])
+    return df
 
 @st.cache_data(ttl=10)
 def load_live_data(use_hdfs):
@@ -214,7 +214,7 @@ else:
                          use_container_width=True, hide_index=True)
 
     # Rolling history timeline
-    live_hist = load_live_history()
+    live_hist = load_live_history(use_hdfs)
     if live_hist is not None and len(live_hist) > 10:
         st.markdown("---")
         st.markdown("**Live Anomaly Timeline (rolling history)**")
@@ -223,20 +223,22 @@ else:
 
         range_col1, range_col2 = st.columns([2, 3])
         with range_col1:
-            time_range = st.selectbox("View Range", ["Last 1 Hour", "Last 6 Hours", "Last 24 Hours", "Last 7 Days", "Last 30 Days", "All Data"], index=2, key="live_range")
-        range_map = {"Last 1 Hour": 1/24, "Last 6 Hours": 6/24, "Last 24 Hours": 1, "Last 7 Days": 7, "Last 30 Days": 30, "All Data": 9999}
+            time_range = st.selectbox("View Range", ["Last 1 Hour", "Last 6 Hours", "Last 24 Hours"], index=2, key="live_range")
+        range_map = {"Last 1 Hour": 1/24, "Last 6 Hours": 6/24, "Last 24 Hours": 1}
         days_back = range_map[time_range]
-        cutoff = pd.Timestamp.now() - pd.Timedelta(days=days_back)
+        # History timestamps are NYC local time, so compare against NYC "now"
+        nyc_now = pd.Timestamp.now(tz="America/New_York").tz_localize(None)
+        cutoff = nyc_now - pd.Timedelta(days=days_back)
+        hist_min, hist_max = lh["date"].min(), lh["date"].max()
         lh = lh[lh["date"] >= cutoff]
 
         with range_col2:
             st.metric("Data Points", f"{len(lh):,}")
 
+        if len(lh) == 0:
+            st.info(f"No live data in this range. History covers {hist_min:%b %d %H:%M} - {hist_max:%b %d %H:%M} (NYC time). Run the streaming pipeline to collect more.")
         if len(lh) > 0:
-            if days_back <= 1/24: freq = "1min"
-            elif days_back <= 1: freq = "5min"
-            elif days_back <= 7: freq = "1h"
-            else: freq = "6h"
+            freq = "1min" if days_back <= 1/24 else "5min"
 
             timeline = lh.groupby(lh["date"].dt.floor(freq)).agg(
                 avg_score=("anomaly_score", "mean"),
@@ -255,7 +257,7 @@ else:
             if "n_disruptions" in timeline.columns:
                 fig_tl.add_trace(go.Bar(x=timeline["date"], y=timeline["n_disruptions"],
                     name="Disruptions", marker_color="rgba(239,68,68,0.4)",
-                    yaxis="y2", width=3600000 if days_back > 1 else 60000))
+                    yaxis="y2", width=60000))
             fig_tl.add_hline(y=0.8, line_dash="dash", line_color="rgba(239,68,68,0.4)", annotation_text="Critical (0.8)")
             fig_tl.add_hline(y=0.5, line_dash="dot", line_color="rgba(250,204,21,0.35)", annotation_text="Anomaly (0.5)")
             fig_tl.update_layout(
@@ -278,27 +280,7 @@ else:
             sum3.metric("Disruption Events", f"{total_disruptions:,}")
             sum4.metric("Anomaly Events", f"{total_anomalies:,}")
 
-            if days_back >= 7 and len(lh) > 100:
-                st.markdown("**Anomaly Heatmap by Hour & Day**")
-                lh["hour"] = lh["date"].dt.hour
-                lh["dayname"] = lh["date"].dt.day_name()
-                day_order = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
-                heat = lh.groupby(["dayname","hour"])["anomaly_score"].mean().reset_index()
-                heat_pivot = heat.pivot(index="dayname", columns="hour", values="anomaly_score").reindex(day_order)
-                fig_heat = go.Figure(data=go.Heatmap(
-                    z=heat_pivot.values, x=[f"{h}:00" for h in range(24)],
-                    y=heat_pivot.index, colorscale="YlOrRd",
-                    colorbar=dict(title="Avg Score", tickfont=dict(color="#94a3b8")),
-                ))
-                fig_heat.update_layout(
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    margin=dict(l=0,r=0,t=10,b=0), height=250,
-                    xaxis=dict(color="#94a3b8", title="Hour of Day"),
-                    yaxis=dict(color="#94a3b8"),
-                )
-                st.plotly_chart(fig_heat, use_container_width=True)
-
-            st.caption(f"Showing {len(timeline)} snapshots ({freq} resolution) \u00b7 History retains up to 30 days")
+            st.caption(f"Showing {len(timeline)} snapshots ({freq} resolution) \u00b7 History keeps the last 24 hours")
 
     # Live vs Historical
     if hist_df is not None:

@@ -27,7 +27,7 @@ st.set_page_config(
     page_title="NeuroTraffic — NYC Transport Intelligence",
     page_icon="🚊",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # ── Global CSS ──
@@ -52,6 +52,8 @@ html, body, [data-testid="stAppViewContainer"] {
 
 /* ── Hide Streamlit chrome ── */
 #MainMenu, footer, header { visibility: hidden; }
+[data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapsedControl"], [data-testid="collapsedControl"], [data-testid="stSidebarCollapseButton"] { visibility: visible !important; }
+[data-testid="stIconMaterial"], .material-symbols-rounded { font-family: "Material Symbols Rounded" !important; }
 [data-testid="stDecoration"] { display: none; }
 
 /* ── Metric cards ── */
