@@ -162,7 +162,7 @@ _.getPath                 // shorthand lambda: x => x.getPath
 Treats a folder that keeps receiving new files as an endless table. Every *trigger* (e.g. 15 s) Spark picks up new files as a **micro-batch** and runs your code on it (`foreachBatch`). A **checkpoint** folder remembers which files are already processed, so a restart doesn't redo them.
 
 ### 3.10 Streamlit
-A Python library that turns a script into a web page. Every time you click something, Streamlit **re-runs the whole script** top to bottom. `@st.cache_data(ttl=60)` remembers a function's result for 60 seconds so data isn't reloaded on every click. Files in `pages/` become extra pages in the sidebar.
+A Python library that turns a script into a web page. Every time you click something, Streamlit **re-runs the whole script** top to bottom. `@st.cache_data(ttl=60)` remembers a function's result for 60 seconds so data isn't reloaded on every click. This project lists its pages with `st.navigation` in `app.py` (the page files are in `views/`).
 
 ---
 
@@ -583,6 +583,11 @@ Doesn't compute anything: it prints the recommended order and commands for the M
 ### `build_live_profiles.scala` — run once
 Averages `combined_v3` per **zone × hour of day × weekday/weekend** for taxi, subway, bike, complaints and events → `lookups/zone_hour_profile.csv` (263 × 24 × 2 = 12,624 rows). This is the "normal level" used by the live system.
 
+### `build_network_lookups.py` (Python) — run once
+**Purpose:** builds the two static layers of the dashboard's Network Map.
+1. `taxi_zones.geojson` — every taxi zone's outline: polygons from the shapefile, simplified (100 ft tolerance) and converted to GPS with pyproj, saved as GeoJSON for the map.
+2. `subway_segments.csv` — the track of each line. The MTA station list has no stop order, so each line's stations are joined with a **minimum spanning tree** (Prim's algorithm: keep adding the closest unconnected station). This follows the real track closely, including express runs and branches. The "S" line is really three separate shuttles, so links longer than 3 km are not drawn for it.
+
 ### `realtime_fetcher.py` ★ live data collector (Python)
 **Run:** `python 07_streaming/realtime_fetcher.py --interval 10`
 
@@ -604,6 +609,7 @@ Averages `combined_v3` per **zone × hour of day × weekday/weekend** for taxi, 
    - fetches all sources **in parallel** (`ThreadPoolExecutor`);
    - `build_batch()` creates one JSON record per zone (263). **Live:** weather, MTA alert line + severity, road speed, events, and Citi Bike where the zone has stations. **Estimated from the profile:** taxi pickups/dropoffs (× a weather factor: rain 1.15, heavy rain 1.3, snow × 1.4), subway ridership, complaints, and bikes where there are no stations (× 0.6 in rain);
    - writes the batch to HDFS `streaming/input/live_<time>_<id>.json` (one JSON object per line);
+   - writes `bike_docks.json`: every Citi Bike dock with its live bikes, free docks and bike changes in the last 15 min (for the Network Map);
    - writes `source_status.json` (age and error of each source) for the dashboard;
    - prints one status line.
 
@@ -663,12 +669,14 @@ streamlit run app.py
 ```
 Opens at http://localhost:8501.
 
+**Layout:** `app.py` (menu) · `ui.py` (shared look) · `config.py` (paths, colours) · `hdfs_helper.py` (HDFS client) · `views/` (one file per page).
+
 ### `config.py`
 All settings in one place:
 - `USE_HDFS` (from the environment variable `NEUROTRAFFIC_USE_HDFS`, default true), `HDFS_HOST`.
-- Every HDFS path (`HDFS_*`) and its local twin (`*_CSV`, `*_PARQUET` under `08_dashboard/data` and `streaming/output`).
-- Thresholds: `ANOMALY_THRESHOLD_YELLOW = 0.50`, `ANOMALY_THRESHOLD_RED = 0.80`.
-- Map centre/zoom, subway line colours and boroughs (`SUBWAY_LINES`), borough colours, colour scale.
+- Every HDFS path (`HDFS_*`) and its local twin (`*_CSV`, `*_JSON`, `*_PARQUET` under `08_dashboard/data` and `streaming/output`).
+- Network Map lookups (`ZONES_GEOJSON`, `SUBWAY_STATIONS_CSV`, `SUBWAY_SEGMENTS_CSV` in `07_streaming/lookups`).
+- Map centre/zoom, official MTA colour per line (`LINE_COLORS`), line groups (`SUBWAY_LINES`), borough colours.
 
 ### `hdfs_helper.py`
 The dashboard's HDFS client over WebHDFS:
@@ -677,45 +685,61 @@ The dashboard's HDFS client over WebHDFS:
 - `read_hdfs_csv` / `read_hdfs_parquet` / `read_hdfs_json`, `write_hdfs_csv`, `make_hdfs_directory`.
 - `load_dataframe(local_path, hdfs_path, use_hdfs)` and `load_json(...)` — **try HDFS first, fall back to the local file**. Every page loads data through these.
 
-### `app.py` — Home page
-1. Keeps the HDFS on/off choice in `st.session_state` and offers an **HDFS Mode** toggle.
-2. Status bar: reads `latest.csv` → "All Systems Normal" or "DISRUPTION — line X · N zones"; shows HDFS connected/offline.
-3. KPI cards from `graph_nodes.csv` and `historical_predictions.parquet`: zones, days analysed, disruptions found, peak anomaly, data sources.
-4. "Explore" cards linking to the four pages, disruptions by borough, a pipeline architecture diagram, and **Data Status** (checks each required file exists in HDFS with a WebHDFS `GETFILESTATUS`, else locally).
+### `app.py` — entry point and menu
+Defines the menu with `st.navigation`: Home, Live Monitor, Network Map, Explorer, Simulator, Analytics (each an `st.Page` with an icon and a URL such as `/live_monitor`). It also shows the **Read data from HDFS** switch, with the connection status, at the top of every page's sidebar, then runs the chosen page. The page files live in `views/`, not `pages/`, because Streamlit would otherwise also build its own automatic menu from a `pages/` folder.
 
-### `pages/1_live_monitor.py` — Live Monitor
-- Loads `latest.csv` (cache 3 s), `graph_nodes.csv` (coordinates, names) and `source_status.json`.
-- Colours each zone: green < 0.5, yellow 0.5–0.8, red ≥ 0.8.
-- Shows counts, a dark map of all 263 zones (Plotly `Scattermap`), a score chart, top anomalies, the **data sources table** (Live/Estimated, age, errors) and the list of active MTA alerts.
-- **Auto refresh:** at the end of the script, `time.sleep(interval)` → clear cache → `st.rerun()` (re-runs the page every 3–30 s).
+### `ui.py` — shared look and helpers
+Used by every page so that everything looks and reads the same:
+- `LEVELS` and `level(score)` — the four anomaly levels used everywhere: **Normal < 0.25** (green), **Elevated 0.25–0.50** (yellow), **Anomaly 0.50–0.80** (orange), **Disruption ≥ 0.80** (red).
+- `setup_page(title, icon, subtitle)` — page config, the dark theme CSS and the page header with a one-line explanation.
+- `section(title, caption, kind)` — section title with a short explanation and a **LIVE / ESTIMATED / HISTORICAL** tag.
+- `level_legend()`, `style_chart(fig)` (common Plotly style; a page's own settings override the defaults), `zone_map(fig)` (dark NYC basemap), `use_hdfs()`.
 
-### `pages/2_simulator.py` — Disruption Simulator
-A **what-if tool**, not a forecast. When you click *Simulate*:
-1. **Line → candidate zones:** zones whose `all_lines` (from `graph_nodes.csv`) include the chosen line; fallback to the line's boroughs, then random zones.
+### `views/0_home.py` — Home
+1. **Right now** (live) — zones in disruption and anomaly, subway lines with an alert, snapshot time; warns if the snapshot is over 10 minutes old.
+2. **Historical results 2022 – 2024** — zones, days, disrupted zone-days and their share.
+3. **Pages** — one link and one sentence per page.
+4. **How the system works** — the 8 steps from download to dashboard.
+5. **Data files** — every file the dashboard reads: found in HDFS or locally, size and last update (WebHDFS `GETFILESTATUS`).
+
+### `views/1_live_monitor.py` — Live Monitor
+- Loads `latest.csv` and `source_status.json` (cache 5 s) and `graph_nodes.csv` (coordinates, names).
+- Snapshot time and age, and counts per level.
+- **Zone map**: one dot per zone in its level colour; bigger dot = higher score.
+- **Zones needing attention**: every zone ≥ 0.50, highest first, with the subway line that has an alert. Next to it, **zones per level by borough** (stacked bars).
+- **Data sources** table (LIVE / ESTIMATED / STALE / DELAYED, age, errors) and the active MTA alerts.
+- **Auto-refresh** (sidebar, default every 15 s): `time.sleep(interval)` → clear the live cache → `st.rerun()`.
+
+### `views/2_simulator.py` — Disruption Simulator
+A **what-if tool**, not a forecast; the page and its "How the simulator works" box say so. The same inputs always give the same result (the random seed comes from `zlib.crc32` of line, hour and day).
+1. **Line → candidate zones:** zones whose `all_lines` (from `graph_nodes.csv`) include the chosen line; fallback to the line's boroughs.
 2. **Time → multiplier:** weekday rush 2.2, weekend rush 1.4, midday 1.3/1.0, evening 0.7, night 0.5.
 3. **Epicenters (red):** weighted-random pick among candidate zones, weighted by PageRank + noise (more noise at night). Count ≈ slider × multiplier / 1.3.
 4. **Cascade (orange):** the zones *nearest by distance* to the epicenters' average position (not along the line).
-5. **Features:** generated volumes per zone from PageRank × multiplier; epicenters get taxi × 2.5–4, subway × 0.05–0.25, bike × 1.8–3; cascades a milder version.
-6. **Score:** the scikit-learn GBT (`models/gbt_model.pkl`, loaded with joblib) gives a probability *p*, but the role dominates: epicenter = 0.70 + 0.08·mult + 0.15·p, cascade = 0.25 + 0.10·mult + 0.30·p, normal = small.
-7. Taxi surge %, bike surge %, subway drop % and time-to-peak are calculated from the score with fixed constants.
-8. Shows the cascade map, epicenter table, cascade timeline and modal-shift metrics.
+5. **Volumes:** generated per zone from PageRank × multiplier; epicenters get taxi × 2.5–4, subway × 0.05–0.25, bike × 1.8–3; cascades a milder version.
+6. **Score:** the scikit-learn GBT (`models/gbt_model.pkl`, loaded once with joblib) gives a probability *p*, but the role dominates: epicenter = 0.70 + 0.08·mult + 0.15·p, cascade = 0.25 + 0.10·mult + 0.30·p, normal = small.
+7. Taxi surge %, bike surge %, subway drop % (capped at 95%) and minutes to peak are calculated from the score with fixed factors.
 
-### `pages/3_explorer.py` — Explorer
-**Live section:**
-- Snapshot metrics, live map and top disrupted zones from `latest.csv`.
-- **Timeline** from `live_history.csv` (HDFS, cache 60 s): choose the last 1, 6 or 24 hours; the cutoff uses **New York time** (`pd.Timestamp.now(tz="America/New_York")`) because the data is in NY time; resampled to 1 or 5-minute buckets; average score, peak score, disruption bars; if the range is empty it shows which period the history covers.
-- **Live vs historical:** compares each zone's live score with its 2023 average.
+### `views/3_explorer.py` — Explorer
+Two tabs:
+- **Last 24 hours (live)** — from `live_history.csv` (cache 60 s): choose 1, 6 or 24 hours; the cutoff uses **New York time** because the data is in NY time; 1- or 5-minute averages of the average and highest zone score, plus the number of zones ≥ 0.50. Periods when the pipeline was not running show as gaps.
+- **History 2022 – 2024** — from `historical_predictions.parquet` (cache 10 min): date range and borough filter over the whole data; disrupted zones per day with a 7-day average; most disrupted zones (quiet zones such as parks and islands rank high because small changes in tiny traffic give large z-scores); share disrupted by weekday; the 15 most disrupted days; **CSV download** of the selection.
 
-**Historical section (2023):** reads `historical_predictions.parquet` (cache 5 min), fixed range Jan–Jun 2023:
-- daily anomaly timeline with a trend line (`np.polyfit`) and known disruption dates (L train, A/C…);
-- top 40 zones bar chart;
-- disruption log + **CSV download**;
-- predicted vs actual (precision, recall, F1, accuracy computed in pandas) and a scatter plot.
+### `views/4_analytics.py` — Analytics
+Reads `evaluation_metrics.json`, `feature_importance.csv`, `graph_nodes.csv` (cache 10 min):
+- A short box explaining what the model does and that its **labels come from the batch detector**, so the scores measure how well it reproduces that detector.
+- Accuracy, precision, recall and F1 **for the disruption class**, calculated from the confusion-matrix counts, plus AUC-ROC; training and test sizes.
+- Tabs: **Errors** (confusion matrix in plain words), **What the model relies on** (feature importance by input type, and why events and rain dominate), **Transport graph** (top zones by PageRank, map by community or borough, network numbers), **Model settings** (the real `train_gbt.scala` settings: 150 trees, depth 4, 23 inputs).
 
-### `pages/4_analytics.py` — Analytics
-Reads `evaluation_metrics.json`, `feature_importance.csv`, `confusion_matrix.csv`, `graph_nodes.csv` (cache 5 min):
-- big metric cards (accuracy, precision, recall, F1, AUC-ROC);
-- tab 1 confusion matrix heatmap; tab 2 feature importance (top N, grouped by category); tab 3 graph analytics (top PageRank nodes, communities, network stats, degree distribution); tab 4 model details text.
+### `views/5_network_map.py` — Network Map
+One live map of every transport mode, drawn with **pydeck** (deck.gl):
+- **Taxi zones** — shaded by the live anomaly level; normal zones are almost transparent so problem zones stand out.
+- **Subway lines** — `subway_segments.csv` in official MTA colours; a line is drawn thicker when it has an active MTA alert (from `source_status.json`). Hovering shows the number of trains reporting on it right now.
+- **Subway stations** — white, or yellow/orange/red by the worst alert on any of their lines.
+- **Citi Bike docks** — from `bike_docks.json`: blue = plenty of bikes, amber = running low, red = almost empty; a bigger dot means more bikes taken or returned in the last 15 min.
+- **Station ↔ dock links** — every station and dock less than 0.8 km apart. A link turns **orange (active)** when the station's line has an alert **and** the dock had at least 3 bike changes in 15 min: the "riders switch from subway to bike" signal.
+
+The sidebar holds the layer switches, link mode, a **Focus on** menu (an alerted line or a borough) and **Refresh now**. Auto-refresh is off by default because every refresh resets the map's zoom. A legend under the map marks each layer LIVE or ESTIMATED.
 
 ### `generate_dashboard_data.scala` (Spark)
 Builds the dashboard's files from the real pipeline outputs:
@@ -757,7 +781,7 @@ docker compose up -d
 ```bash
 docker exec -it spark-master /spark/bin/spark-shell --master spark://spark-master:7077 --conf spark.ui.showConsoleProgress=false -i /project/07_streaming/live_pipeline.scala
 ```
-Then start the dashboard (see 08_dashboard). Run the fetcher and the pipeline in separate terminals.
+Then start the dashboard (see 08_dashboard). Pages: Home, Live Monitor, Network Map, Explorer, Simulator, Analytics. Run the fetcher and the pipeline in separate terminals.
 
 **Web UIs:** NameNode http://localhost:9870 · DataNodes :9864 / :9865 / :9866 · Spark Master http://localhost:8080 · Spark job :4040 · Dashboard http://localhost:8501
 
@@ -784,10 +808,7 @@ Know these before a demo or viva — examiners often ask.
 
 **Known quirks**
 - The simulator uses `gbt_model.pkl` from the old Python `train_gbt.py`, which isn't in the project any more. The Scala `train_gbt.scala` saves a Spark model instead.
-- Analytics page "Model details" text says 50 trees / depth 5, but `train_gbt.scala` uses 150 trees / depth 4.
-- Analytics page computes the FN card as `TP − TP × recall` instead of reading `false_negatives` from the JSON.
-- The Analytics model selector offers "Isolation Forest", but the current pipeline uses z-score + KMeans instead.
-- The simulator's random seed uses Python's `hash()`, which changes when the dashboard restarts, so the same scenario can look different after a restart.
+- `evaluation_metrics.json` also contains an `isolation_forest` block that is an exact copy of the GBT numbers; the dashboard ignores it.
 - `hadoop.env` has YARN/MapReduce settings, but no YARN containers run; the bash MapReduce job would need a YARN setup.
 - `.claude/launch.json` still points to an old `F:\` path.
 - Unused older versions kept for reference: `streaming_pipeline.scala`, `spark_live_processor.py`, `live_processor.py`, `scoring_module.scala`.

@@ -60,6 +60,7 @@ DATANODE_PORT_MAP = {"datanode1": 9864, "datanode2": 9865, "datanode3": 9866}
 
 INPUT_DIR = "/data/streaming/input"
 STATUS_PATH = "/data/streaming/output/source_status.json"
+BIKE_DOCKS_PATH = "/data/streaming/output/bike_docks.json"
 PROFILE_HDFS = "/data/neurotraffic/lookups/zone_hour_profile.csv"
 PROFILE_LOCAL = os.path.join(LOOKUP_DIR, "zone_hour_profile.csv")
 
@@ -104,19 +105,26 @@ def fix_redirect(url):
 
 
 def hdfs_write(path, text):
-    r = requests.put(f"{WEBHDFS_BASE}{path}?op=CREATE&overwrite=true", allow_redirects=False, timeout=10)
-    if r.status_code != 307:
+    """Write a file to HDFS. Returns False on any failure, so one slow DataNode never stops the fetcher."""
+    try:
+        r = requests.put(f"{WEBHDFS_BASE}{path}?op=CREATE&overwrite=true", allow_redirects=False, timeout=10)
+        if r.status_code != 307:
+            return False
+        r = requests.put(fix_redirect(r.headers["Location"]), data=text.encode("utf-8"),
+                         headers={"Content-Type": "application/octet-stream"}, timeout=30)
+        return r.status_code in (200, 201)
+    except requests.RequestException:
         return False
-    r = requests.put(fix_redirect(r.headers["Location"]), data=text.encode("utf-8"),
-                     headers={"Content-Type": "application/octet-stream"}, timeout=10)
-    return r.status_code in (200, 201)
 
 
 def hdfs_read(path):
-    r = requests.get(f"{WEBHDFS_BASE}{path}?op=OPEN", allow_redirects=False, timeout=10)
-    if r.status_code == 307:
-        r = requests.get(fix_redirect(r.headers["Location"]), timeout=30)
-    return r.text if r.status_code == 200 else None
+    try:
+        r = requests.get(f"{WEBHDFS_BASE}{path}?op=OPEN", allow_redirects=False, timeout=10)
+        if r.status_code == 307:
+            r = requests.get(fix_redirect(r.headers["Location"]), timeout=30)
+        return r.text if r.status_code == 200 else None
+    except requests.RequestException:
+        return None
 
 
 def hdfs_available():
@@ -443,6 +451,8 @@ class LiveCitiBike:
 
     def __init__(self, locator):
         self.station_zone = {}
+        self.station_info = {}
+        self.docks_free = {}
         self.prev = None
         self.prev_time = None
         self.windows = deque()
@@ -461,6 +471,8 @@ class LiveCitiBike:
             zone = locator.zone_of(s["lat"], s["lon"])
             if zone is not None:
                 self.station_zone[s["station_id"]] = zone
+                self.station_info[s["station_id"]] = {"name": s["name"], "lat": s["lat"], "lon": s["lon"],
+                                                    "capacity": s.get("capacity", 0), "zone_id": zone}
         print(f"    Citi Bike: {len(self.station_zone)} stations mapped to taxi zones")
 
     def fetch(self):
@@ -470,13 +482,15 @@ class LiveCitiBike:
             j = requests.get(CITIBIKE_STATUS_URL, timeout=15).json()
             now = nyc_now()
             snap = {s["station_id"]: s.get("num_bikes_available", 0) for s in j["data"]["stations"]}
+            self.docks_free = {s["station_id"]: s.get("num_docks_available", 0) for s in j["data"]["stations"]}
             if self.prev is not None:
-                moves = Counter()
+                moves, dock_moves = Counter(), Counter()
                 for sid, bikes in snap.items():
                     zone = self.station_zone.get(sid)
                     if zone is not None and sid in self.prev:
                         moves[zone] += abs(bikes - self.prev[sid])
-                self.windows.append((self.prev_time, now, moves))
+                        dock_moves[sid] += abs(bikes - self.prev[sid])
+                self.windows.append((self.prev_time, now, moves, dock_moves))
                 while self.windows and now - self.windows[0][0] > BIKE_WINDOW:
                     self.windows.popleft()
             self.prev, self.prev_time = snap, now
@@ -491,9 +505,18 @@ class LiveCitiBike:
             return None
         hours = (self.windows[-1][1] - self.windows[0][0]).total_seconds() / 3600
         total = Counter()
-        for _, _, moves in self.windows:
+        for _, _, moves, _ in self.windows:
             total.update(moves)
         return {z: m / 2 / hours for z, m in total.items()}, hours * 60
+
+    def dock_snapshot(self):
+        """Every mapped dock with its live bikes, free docks and activity in the last 15 min."""
+        activity = Counter()
+        for _, _, _, dock_moves in self.windows:
+            activity.update(dock_moves)
+        return [{"id": sid, **info, "bikes": self.prev.get(sid, 0) if self.prev else 0,
+                 "docks_free": self.docks_free.get(sid, 0), "moves_15min": activity.get(sid, 0)}
+                for sid, info in self.station_info.items()]
 
     @property
     def zones_with_stations(self):
@@ -685,6 +708,13 @@ def write_status(sources, weather, mta, trains, traffic):
     return hdfs_write(STATUS_PATH, json.dumps(status))
 
 
+def write_bike_docks(bikes):
+    snapshot = {"generated_at": nyc_now().isoformat(),
+                "observed_at": bikes.observed_at.isoformat() if bikes.observed_at else None,
+                "docks": bikes.dock_snapshot()}
+    return hdfs_write(BIKE_DOCKS_PATH, json.dumps(snapshot))
+
+
 def run(interval):
     print("\n" + "=" * 64)
     print("  NeuroTraffic - Live NYC Data Fetcher (all times America/New_York)")
@@ -731,6 +761,7 @@ def run(interval):
             ok = hdfs_write(f"{INPUT_DIR}/live_{nyc_now():%Y%m%d_%H%M%S}_{batch_id:06d}.json",
                             "\n".join(json.dumps(r) for r in records))
             write_status(sources, weather, mta, trains, traffic)
+            write_bike_docks(bikes)
 
             w = weather.data
             wstr = f"{w['temperature_c']}C" + (" rain" if w["is_rain"] else "")

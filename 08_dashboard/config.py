@@ -41,6 +41,7 @@ HDFS_STREAMING_INPUT_DIR     = "/data/streaming/input"
 HDFS_STREAMING_OUTPUT_DIR    = "/data/streaming/output"
 HDFS_LATEST_CSV              = "/data/streaming/output/latest.csv"
 HDFS_LIVE_HISTORY_CSV        = "/data/streaming/output/live_history.csv"
+HDFS_BIKE_DOCKS_JSON         = "/data/streaming/output/bike_docks.json"
 HDFS_SOURCE_STATUS_JSON      = "/data/streaming/output/source_status.json"
 
 # ── Local Data paths ──
@@ -58,6 +59,13 @@ STREAMING_INPUT_DIR  = os.path.join(STREAMING_DIR, "input")
 STREAMING_OUTPUT_DIR = os.path.join(STREAMING_DIR, "output")
 LATEST_CSV           = os.path.join(STREAMING_OUTPUT_DIR, "latest.csv")
 SOURCE_STATUS_JSON   = os.path.join(STREAMING_OUTPUT_DIR, "source_status.json")
+BIKE_DOCKS_JSON      = os.path.join(STREAMING_OUTPUT_DIR, "bike_docks.json")
+
+# ── Network Map lookups (built by 07_streaming/build_live_lookups.py + build_network_lookups.py) ──
+LOOKUPS_DIR          = os.path.join(BASE_DIR, "..", "07_streaming", "lookups")
+ZONES_GEOJSON        = os.path.join(LOOKUPS_DIR, "taxi_zones.geojson")
+SUBWAY_STATIONS_CSV  = os.path.join(LOOKUPS_DIR, "subway_station_zones.csv")
+SUBWAY_SEGMENTS_CSV  = os.path.join(LOOKUPS_DIR, "subway_segments.csv")
 
 # ── Model paths ──
 MODELS_DIR           = os.path.join(BASE_DIR, "models")
@@ -69,6 +77,17 @@ MAP_CENTER               = {"lat": 40.7380, "lon": -73.9800}
 MAP_ZOOM                 = 10
 ANOMALY_THRESHOLD_YELLOW = 0.50       # anomaly_score above this → yellow
 ANOMALY_THRESHOLD_RED    = 0.80       # anomaly_score above this → red
+
+# ── Official MTA colour of every individual line (Network Map) ──
+LINE_COLORS = {
+    "1": "#EE352E", "2": "#EE352E", "3": "#EE352E",
+    "4": "#00933C", "5": "#00933C", "6": "#00933C", "7": "#B933AD",
+    "A": "#0039A6", "C": "#0039A6", "E": "#0039A6",
+    "B": "#FF6319", "D": "#FF6319", "F": "#FF6319", "M": "#FF6319",
+    "G": "#6CBE45", "J": "#996633", "Z": "#996633", "L": "#A7A9AC",
+    "N": "#FCCC0A", "Q": "#FCCC0A", "R": "#FCCC0A", "W": "#FCCC0A",
+    "S": "#808183", "SIR": "#1D2F6F",
+}
 
 # ── Subway lines ──
 SUBWAY_LINES = {
